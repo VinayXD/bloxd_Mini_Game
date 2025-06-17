@@ -11,6 +11,9 @@ import {
   Quaternion,
   KeyboardEventTypes
 } from "@babylonjs/core";
+import { WorldGenerator } from "./WorldGenerator";
+import "@babylonjs/inspector";
+
 
 import { PlayerController } from "./PlayerController";
 
@@ -21,15 +24,18 @@ export function createGame(canvas: HTMLCanvasElement) {
   // === LIGHT ===
   const light = new HemisphericLight("light", new Vector3(0, 1, 0), scene);
 
-  // === GROUND (Optional)
-  const ground = MeshBuilder.CreateGround("ground", { width: 20, height: 20 }, scene);
+  // === WORLD GENERATION ===
+    const world = new WorldGenerator(scene);
+    world.generateTerrain(); // width, depth, blockSize, maxHeight
+ // 10x10 plate
+
 
   // === PLAYER ===
   const player = MeshBuilder.CreateCapsule("player", {
     height: 2,
     radius: 0.5,
   }, scene);
-  player.position.y = 1;
+  player.position.y = 10;
 
   const playerMat = new StandardMaterial("playerMat", scene);
   playerMat.diffuseColor = new Color3(1, 0, 0); // red
@@ -98,4 +104,6 @@ export function createGame(canvas: HTMLCanvasElement) {
   window.addEventListener("resize", () => {
     engine.resize();
   });
+  
+  
 }
