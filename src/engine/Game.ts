@@ -60,5 +60,5 @@ export async function createGame(canvas: HTMLCanvasElement) {
     engine.resize();
   });
 
-  scene.debugLayer.show();
+  //scene.debugLayer.show();
 }

@@ -5,11 +5,11 @@ import {
   Vector3,
   Quaternion,
   SceneLoader,
-  Mesh,
-  AbstractMesh,
-  TransformNode
+  TransformNode,
+  PointerEventTypes,
+  Scalar
 } from "@babylonjs/core";
-import "@babylonjs/loaders"; // Enables .glb and .gltf support
+import "@babylonjs/loaders";
 
 let instance: PlayerController | null = null;
 
@@ -22,6 +22,12 @@ export class PlayerController {
   private speed = 0.1;
   private enabled = true;
 
+  // 👇 Rotation state for A/D lean
+  private strafeRotationTarget: number = 0;
+  private strafeRotationCurrent: number = 0;
+  private maxStrafeAngle = Math.PI / 4; // 45 degrees
+  private strafeSpeed = 0.1; // lerp smoothing
+
   private constructor(scene: Scene, player: TransformNode, camera: ArcRotateCamera) {
     this.scene = scene;
     this.player = player;
@@ -29,6 +35,7 @@ export class PlayerController {
 
     this.registerInput();
     this.registerUpdate();
+    this.setupMouseCameraControl();
 
     console.log("🧍 Player mesh created:", this.player.name);
     console.log("📸 Third person cam created:", this.thirdPersonCam.name);
@@ -37,26 +44,26 @@ export class PlayerController {
   public static async getInstance(scene: Scene): Promise<PlayerController> {
     if (instance) return instance;
 
-    // ✅ Load the entire GLB model
     const result = await SceneLoader.ImportMeshAsync("", "/models/", "ninja1.glb", scene);
-    // ❌ Stop auto-play animations
-    result.animationGroups.forEach((group) => {
-    group.stop(); // Stop all animations from playing by default
-    });
-    // ✅ Use the root node of the imported model
-    const modelRoot = result.meshes[0] as TransformNode;
+    // Check if skeleton is present
+    if (result.skeletons.length > 0) {
+      console.log("✅ Skeleton found!");
+      console.log("Bones:", result.skeletons[0].bones.map(b => b.name));
+    } else {
+      console.log("❌ No skeleton or bones found in this .glb.");
+    }
+    result.animationGroups.forEach((group) => group.stop());
 
+    const modelRoot = result.meshes[0] as TransformNode;
     modelRoot.position = new Vector3(0, 10, 0);
     modelRoot.rotationQuaternion = Quaternion.Identity();
     modelRoot.scaling = new Vector3(1, 1, 1);
 
-    // ✅ Set all parts visible/enabled
     result.meshes.forEach((m) => {
       m.isVisible = true;
       m.setEnabled(true);
     });
 
-    // ✅ Create third-person camera
     const camera = new ArcRotateCamera(
       "ThirdPersonCam",
       Math.PI / 2,
@@ -68,6 +75,8 @@ export class PlayerController {
     camera.lowerRadiusLimit = 6;
     camera.upperRadiusLimit = 15;
     camera.setPosition(new Vector3(0, 10, -10));
+    camera.inputs.clear(); // Disable default input
+    camera.attachControl(false);
 
     instance = new PlayerController(scene, modelRoot, camera);
     return instance;
@@ -92,11 +101,13 @@ export class PlayerController {
     this.scene.onBeforeRenderObservable.add(() => {
       if (!this.enabled) return;
 
+      // Direction vectors from camera
       const forward = this.thirdPersonCam.getForwardRay().direction;
       const right = Vector3.Cross(forward, Vector3.Up()).normalize();
 
       let moveDir = Vector3.Zero();
 
+      // ✅ Movement (no rotation)
       if (this.inputMap["w"] || this.inputMap["arrowup"]) moveDir = moveDir.add(forward);
       if (this.inputMap["s"] || this.inputMap["arrowdown"]) moveDir = moveDir.subtract(forward);
       if (this.inputMap["d"] || this.inputMap["arrowright"]) moveDir = moveDir.subtract(right);
@@ -106,13 +117,56 @@ export class PlayerController {
         moveDir.y = 0;
         moveDir.normalize();
         this.player.position.addInPlace(moveDir.scale(this.speed));
-
-        const angle = Math.atan2(moveDir.x, moveDir.z);
-        this.player.rotationQuaternion = Quaternion.FromEulerAngles(0, angle, 0);
       }
 
-      // Camera follow
+      // ✅ Smooth lean rotation from A/D only
+      if (this.inputMap["a"] || this.inputMap["arrowleft"]) {
+        this.strafeRotationTarget = -this.maxStrafeAngle;
+      } else if (this.inputMap["d"] || this.inputMap["arrowright"]) {
+        this.strafeRotationTarget = this.maxStrafeAngle;
+      } else {
+        this.strafeRotationTarget = 0;
+      }
+
+      this.strafeRotationCurrent = Scalar.Lerp(
+        this.strafeRotationCurrent,
+        this.strafeRotationTarget,
+        this.strafeSpeed
+      );
+
+      // 🌀 Apply only lean rotation (not tied to movement)
+      this.player.rotationQuaternion = Quaternion.FromEulerAngles(0, this.strafeRotationCurrent, 0);
+
+      // 🎥 Keep camera focused
       this.thirdPersonCam.setTarget(this.player.position);
+    });
+  }
+
+  private setupMouseCameraControl() {
+    let previousX: number | null = null;
+    let previousY: number | null = null;
+    const sensitivity = 0.005;
+
+    this.scene.onPointerObservable.add((pointerInfo) => {
+      if (pointerInfo.type === PointerEventTypes.POINTERMOVE) {
+        const event = pointerInfo.event as PointerEvent;
+
+        if (previousX !== null && previousY !== null) {
+          const deltaX = event.clientX - previousX;
+          const deltaY = event.clientY - previousY;
+
+          this.thirdPersonCam.alpha -= deltaX * sensitivity;
+          this.thirdPersonCam.beta -= deltaY * sensitivity;
+        }
+
+        previousX = event.clientX;
+        previousY = event.clientY;
+      }
+
+      if (pointerInfo.type === PointerEventTypes.POINTERUP) {
+        previousX = null;
+        previousY = null;
+      }
     });
   }
 }
