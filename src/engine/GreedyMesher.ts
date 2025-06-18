@@ -3,9 +3,7 @@ import {
   Scene,
   Mesh,
   VertexData,
-  Vector3,
-  Color4,
-  MeshBuilder,
+  
 } from "@babylonjs/core";
 
 export class GreedyMesher {
