@@ -31,8 +31,8 @@ export class WorldGenerator {
     // Black wireframe outline material
     const outlineMat = new StandardMaterial("outlineMat", this.scene);
     outlineMat.emissiveColor = new Color3(0, 0, 0); // black
-    outlineMat.wireframe = true;
-    outlineMat.alpha = 1; // fully visible lines
+    // outlineMat.wireframe = true;
+    //outlineMat.alpha = 1; // fully visible lines
 
     // Outline mesh (slightly bigger)
     const outlineBlock = MeshBuilder.CreateBox("outline", { size: blockSize * 1.01 }, this.scene);

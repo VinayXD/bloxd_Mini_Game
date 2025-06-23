@@ -10,6 +10,7 @@ import {
 import { WorldGenerator } from "./WorldGenerator";
 import { PlayerController } from "./PlayerController";
 
+
 import "@babylonjs/inspector";
 import "@babylonjs/loaders";
 
@@ -38,7 +39,7 @@ export async function createGame(canvas: HTMLCanvasElement) {
   let isThirdPerson = true;
   scene.activeCamera = controller.thirdPersonCam;
   scene.activeCamera.attachControl(canvas, true);
-  controller.setEnabled(true);
+  
 
   scene.onKeyboardObservable.add((kbInfo) => {
     if (kbInfo.type === KeyboardEventTypes.KEYDOWN && kbInfo.event.key === "Tab") {
@@ -47,9 +48,17 @@ export async function createGame(canvas: HTMLCanvasElement) {
       scene.activeCamera?.detachControl();
       scene.activeCamera = isThirdPerson ? controller.thirdPersonCam : freeCam;
       scene.activeCamera.attachControl(canvas, true);
-      controller.setEnabled(isThirdPerson);
+      
     }
   });
+
+ 
+// === PLAYER + ANIMATION ===
+
+
+
+ // 👈 Load and log animation groups
+
 
   // === RENDER LOOP ===
   engine.runRenderLoop(() => {
