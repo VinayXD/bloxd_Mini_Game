@@ -7,245 +7,125 @@ import {
   SceneLoader,
   TransformNode,
   PointerEventTypes,
-  Scalar,
-  Skeleton,
-  Bone,
-  AnimationGroup
+  Scalar
+
 } from "@babylonjs/core";
+
 import "@babylonjs/loaders";
 
-let instance: PlayerController | null = null;
+import { PlayerAnimation } from "./PlayerAnimation";
 
-type AnimationState = "Idle" | "Walk" | "Sprint" | "Attack";
+let instance: PlayerController | null = null;
 
 export class PlayerController {
   public readonly player: TransformNode;
   public readonly thirdPersonCam: ArcRotateCamera;
+  public readonly animation: PlayerAnimation;
 
   private scene: Scene;
   private inputMap: Record<string, boolean> = {};
   private speed = 0.05;
   private enabled = true;
-  private isShiftPressed: boolean = false;
-  private currentState: AnimationState = "Idle";
-  private animationGroups: Map<string, AnimationGroup> = new Map();
-  private skeleton: Skeleton | null = null;
-  private isAttacking: boolean = false;
 
-  private constructor(scene: Scene, player: TransformNode, camera: ArcRotateCamera) {
+private walkSpeed = 0.05;
+private sprintSpeed = 0.1;
+private crouchSpeed = 0.025;
+
+private isShiftPressed: boolean = false;
+private isCrouching: boolean = false;
+
+private strafeRotationTarget: number = 0;
+  private strafeRotationCurrent: number = 0;
+  private maxStrafeAngle = Math.PI / 4;
+  private strafeSpeed = 0.1;
+
+  private constructor(
+    scene: Scene,
+    player: TransformNode,
+    camera: ArcRotateCamera,
+    animation: PlayerAnimation
+  ) {
     this.scene = scene;
     this.player = player;
     this.thirdPersonCam = camera;
+    this.animation = animation;
 
     this.registerInput();
     this.registerUpdate();
     this.setupMouseCameraControl();
+
+    console.log("🧍 Player mesh created:", this.player.name);
+    console.log("📸 Third person cam created:", this.thirdPersonCam.name);
   }
 
-public static async getInstance(scene: Scene): Promise<PlayerController> {
-  if (instance) return instance;
+  public static async getInstance(scene: Scene): Promise<PlayerController> {
+    if (instance) return instance;
 
-  const result = await SceneLoader.ImportMeshAsync("", "/models/", "ninja.glb", scene);
+    const result = await SceneLoader.ImportMeshAsync("", "/models/", "ninja.glb", scene);
 
-  const modelRoot = result.meshes[0] as TransformNode;
-  const camera = new ArcRotateCamera(
-    "ThirdPersonCam",
-    Math.PI / 2,
-    Math.PI / 3,
-    10,
-    modelRoot.position,
-    scene
-  );
-  camera.lowerRadiusLimit = 6;
-  camera.upperRadiusLimit = 15;
-  camera.setPosition(new Vector3(0, 10, -10));
-  camera.inputs.clear();
-  camera.attachControl(true);
-
-  const controller = new PlayerController(scene, modelRoot, camera);
-
-  // Set skeleton
-  if (result.skeletons.length > 0) {
-    controller.skeleton = result.skeletons[0];
-  }
-
-  // === 🧪 LOG SKELETON BONES ===
-  if (controller.skeleton) {
-    console.log("🦴 Skeleton Bones:");
-    controller.skeleton.bones.forEach((bone) => {
-      console.log("🔹", bone.name);
-    });
-  }
-
-  // === 🧪 LOG ANIMATION GROUPS AND TARGETS ===
-  result.animationGroups.forEach(group => {
-    console.log(`🎞️ Animation Group: ${group.name}`);
-    group.targetedAnimations.forEach(({ target, animation }) => {
-      const boneName = (target as Bone)?.name ?? "unknown";
-      console.log(`  👉 Target Bone: ${boneName}, Animation: ${animation.name}, Keys: ${animation.getKeys().length}`);
-    });
-  });
-
-  // === RIGHT-ATTACK FILTER TEST ===
-  const rightAttackGroup = result.animationGroups.find(g => g.name === "Right-Attack");
-  if (rightAttackGroup) {
-    const rightArmTargets = ["rightarmBone"];  // ✅ Make sure this matches the bone name from logs
-
-    // Filter only matching bone targets
-    const filteredAnimations = rightAttackGroup.targetedAnimations.filter(({ target }) =>
-      rightArmTargets.includes((target as Bone).name)
-    );
-
-    console.log("🎯 Filtered Right-Attack to:");
-    filteredAnimations.forEach(({ target }) =>
-      console.log("  🎯", (target as Bone).name)
-    );
-
-    // 🧪 Check if filtering worked
-    if (filteredAnimations.length === 0) {
-      console.warn("❌ No matching animations for 'rightarmBone'. Skipping filtering.");
+    if (result.skeletons.length > 0) {
+      console.log("✅ Skeleton found!");
+      console.log("Bones:", result.skeletons[0].bones.map(b => b.name));
     } else {
-      // Clear and add only filtered animations
-      rightAttackGroup.targetedAnimations.length = 0;
-      filteredAnimations.forEach(({ animation, target }) => {
-        rightAttackGroup.addTargetedAnimation(animation, target);
-      });
-      console.log("✅ Filtered Right-Attack to rightarmBone only.");
+      console.log("❌ No skeleton or bones found in this .glb.");
     }
-  } else {
-    console.warn("❌ Right-Attack animation group not found.");
+
+    result.animationGroups.forEach((group) => group.stop());
+
+    const modelRoot = result.meshes[0] as TransformNode;
+
+    modelRoot.position = new Vector3(0, 10, 0);
+    modelRoot.rotationQuaternion = Quaternion.Identity();
+    modelRoot.scaling = new Vector3(1, 1, 1);
+
+    result.meshes.forEach((m) => {
+      m.isVisible = true;
+      m.setEnabled(true);
+    });
+
+    const camera = new ArcRotateCamera(
+      "ThirdPersonCam",
+      Math.PI / 2,
+      Math.PI / 3,
+      10,
+      modelRoot.position,
+      scene
+    );
+    camera.lowerRadiusLimit = 6;
+    camera.upperRadiusLimit = 15;
+    camera.setPosition(new Vector3(0, 10, -10));
+    camera.inputs.clear(); // Disable default input
+    camera.attachControl(false);
+
+    const animation = new PlayerAnimation(scene, result.skeletons[0], result.animationGroups);
+
+    instance = new PlayerController(scene, modelRoot, camera, animation);
+    return instance;
   }
 
-  // === Add all animation groups ===
-  result.animationGroups.forEach((group) => {
-    group.stop();
-    controller.animationGroups.set(group.name.toLowerCase(), group);
-  });
-
-  // === Model Setup ===
-  modelRoot.position = new Vector3(0, 10, 0);
-  modelRoot.rotationQuaternion = Quaternion.Identity();
-  modelRoot.scaling = new Vector3(0.8, 0.8, 0.8);
-
-  result.meshes.forEach((m) => {
-    m.isVisible = true;
-    m.setEnabled(true);
-  });
-
-  instance = controller;
-  return controller;
-}
-
-
-  private setEnabled(state: boolean) {
+  public setEnabled(state: boolean) {
     this.enabled = state;
   }
 
-  private registerInput() {
-    this.scene.onKeyboardObservable.add((kbInfo) => {
-      const key = kbInfo.event.key.toLowerCase();
-      if (kbInfo.type === KeyboardEventTypes.KEYDOWN) {
-        this.inputMap[key] = true;
-        if (key === "shift") this.isShiftPressed = true;
-      } else if (kbInfo.type === KeyboardEventTypes.KEYUP) {
-        this.inputMap[key] = false;
-        if (key === "shift") this.isShiftPressed = false;
-      }
-    });
+private registerInput() {
+  this.scene.onKeyboardObservable.add((kbInfo) => {
+    const key = kbInfo.event.key.toLowerCase();
 
-    this.scene.onPointerObservable.add((pointerInfo) => {
-      if (pointerInfo.type === PointerEventTypes.POINTERDOWN) {
-        const event = pointerInfo.event as PointerEvent;
-        if (event.button === 0) {
-          this.triggerAttack();
-        }
-      }
-    });
-  }
+    if (kbInfo.type === KeyboardEventTypes.KEYDOWN) {
+      this.inputMap[key] = true;
 
-private triggerAttack() {
-  console.log("🧪 triggerAttack called");
+      if (key === "shift") this.isShiftPressed = true;
+      if (key === "c") this.isCrouching = true;
 
-  if (this.isAttacking || !this.skeleton) return;
+    } else if (kbInfo.type === KeyboardEventTypes.KEYUP) {
+      this.inputMap[key] = false;
 
-  const attackGroup = this.animationGroups.get("right-attack");
-  if (!attackGroup) {
-    console.warn("❌ Animation group 'Right-Attack' not found.");
-    return;
-  }
-
-  const rightArmBone = this.skeleton.bones.find(b => b.name === "rightarmBone");
-  if (!rightArmBone) {
-    console.warn("❌ Bone 'rightarmBone' not found.");
-    return;
-  }
-
-  // Get only animations for rightarmBone
-  const armAnimations = attackGroup.targetedAnimations.filter(
-    ({ target }) => (target as Bone).name === "rightarmBone"
-  );
-
-  if (armAnimations.length === 0) {
-    console.warn("⚠️ No animations targeting 'rightarmBone' in Right-Attack group.");
-    return;
-  }
-
-  // 🧪 DEBUG LOG KEYFRAMES
-  armAnimations.forEach(({ animation }) => {
-    const keys = animation.getKeys();
-    console.log(`🎬 Arm animation '${animation.name}' has ${keys.length} keys`);
-    keys.forEach((k, i) => {
-      console.log(`  🔹 [${i}] Frame: ${k.frame}, Value: ${JSON.stringify(k.value)}`);
-    });
+      if (key === "shift") this.isShiftPressed = false;
+      if (key === "c") this.isCrouching = false;
+    }
   });
-
-  this.isAttacking = true;
-
-  // ✅ Recommended fallback: Play the whole animation group for visual confirmation
-  // Remove this fallback after confirming rightarm animation actually moves something
-  attackGroup.start(false, 1.0, attackGroup.from, attackGroup.to, false);
-  attackGroup.onAnimationGroupEndObservable.addOnce(() => {
-    this.isAttacking = false;
-    console.log("✅ Right-attack finished (group)");
-  });
-
-  /*
-  // 🧪 Alternatively, direct animation on just the bone (keep if you want layered)
-  armAnimations.forEach(({ animation }) => {
-    this.scene.beginDirectAnimation(
-      rightArmBone,
-      [animation],
-      attackGroup.from,
-      attackGroup.to,
-      false,
-      1.0,
-      () => {
-        this.isAttacking = false;
-        console.log("✅ Right-attack finished (bone)");
-      }
-    );
-  });
-  */
 }
 
-  private playAnimation(state: AnimationState) {
-    if (this.currentState === state) return;
-
-    const animNameMap: Record<string, string> = {
-      idle: "Idle",
-      walk: "Walk",
-      sprint: "Sprint"
-    };
-
-    const groupName = animNameMap[state.toLowerCase()] ?? state.toLowerCase();
-    const currentAnim = this.animationGroups.get(this.currentState.toLowerCase());
-    const nextAnim = this.animationGroups.get(groupName.toLowerCase());
-
-    if (currentAnim) currentAnim.stop();
-    if (nextAnim) nextAnim.start(true);
-
-    this.currentState = state;
-  }
 
 private registerUpdate() {
   this.scene.onBeforeRenderObservable.add(() => {
@@ -262,31 +142,71 @@ private registerUpdate() {
     if (this.inputMap["a"] || this.inputMap["arrowleft"]) moveDir = moveDir.add(right);
 
     const isMoving = !moveDir.equals(Vector3.Zero());
+
+    // 🏃 Set movement speed based on state
+    if (this.isCrouching) {
+      this.speed = this.crouchSpeed;
+    } else if (isMoving && this.isShiftPressed) {
+      this.speed = this.sprintSpeed;
+    } else {
+      this.speed = this.walkSpeed;
+    }
+
+    // 🚶 Apply movement
     if (isMoving) {
       moveDir.y = 0;
       moveDir.normalize();
       this.player.position.addInPlace(moveDir.scale(this.speed));
     }
 
-    // Smoothly rotate player to face camera direction
-    const cameraForward = this.thirdPersonCam.getForwardRay().direction;
-    const yaw = Math.atan2(cameraForward.x, cameraForward.z);
-    const targetQuat = Quaternion.FromEulerAngles(0, yaw, 0);
-    this.player.rotationQuaternion = Quaternion.Slerp(this.player.rotationQuaternion!, targetQuat, 0.1);
+    // 🎯 Get flat camera forward direction
+    const camForward = this.thirdPersonCam.getForwardRay().direction;
+    camForward.y = 0;
+    camForward.normalize();
 
-    // 🔄 Always update base animation (Idle, Walk, Sprint), even during attack
-    if (isMoving && this.isShiftPressed) {
-      this.playAnimation("Sprint");
-    } else if (isMoving) {
-      this.playAnimation("Walk");
+    // 🌀 Calculate full rotation with strafe offset
+    const baseAngle = Math.atan2(camForward.x, camForward.z);
+
+    // 🔁 Handle strafe lean from A/D
+    if (this.inputMap["a"] || this.inputMap["arrowleft"]) {
+      this.strafeRotationTarget = -this.maxStrafeAngle;
+    } else if (this.inputMap["d"] || this.inputMap["arrowright"]) {
+      this.strafeRotationTarget = this.maxStrafeAngle;
     } else {
-      this.playAnimation("Idle");
+      this.strafeRotationTarget = 0;
     }
 
-    // 🎯 Keep camera focused on player
+    this.strafeRotationCurrent = Scalar.Lerp(
+      this.strafeRotationCurrent,
+      this.strafeRotationTarget,
+      this.strafeSpeed
+    );
+
+    const totalAngle = baseAngle + this.strafeRotationCurrent;
+    const targetRotation = Quaternion.FromEulerAngles(0, totalAngle, 0);
+    this.player.rotationQuaternion = Quaternion.Slerp(
+      this.player.rotationQuaternion!,
+      targetRotation,
+      0.1
+    );
+
+    // 🎥 Keep camera targeting player
     this.thirdPersonCam.setTarget(this.player.position);
+
+    // 🎭 Animation state
+    if (this.isCrouching) {
+      this.animation.playBaseAnimation("Crouch");
+    } else if (isMoving && this.isShiftPressed) {
+      this.animation.playBaseAnimation("Sprint");
+    } else if (isMoving) {
+      this.animation.playBaseAnimation("Walk");
+    } else {
+      this.animation.playBaseAnimation("Idle");
+    }
   });
 }
+
+
 
 
   private setupMouseCameraControl() {

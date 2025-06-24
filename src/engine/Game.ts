@@ -1,45 +1,43 @@
+// Game.ts
 import {
-  UniversalCamera,
+  Engine,
   Scene,
   Vector3,
-  Engine,
   HemisphericLight,
-  KeyboardEventTypes
+  UniversalCamera,
+  KeyboardEventTypes,
 } from "@babylonjs/core";
 
 import { WorldGenerator } from "./WorldGenerator";
 import { PlayerController } from "./PlayerController";
 
-
 import "@babylonjs/inspector";
 import "@babylonjs/loaders";
 
 export async function createGame(canvas: HTMLCanvasElement) {
-  
   const engine = new Engine(canvas, true);
   const scene = new Scene(engine);
 
   // === LIGHT ===
-  const light = new HemisphericLight("light", new Vector3(0, 1, 0), scene);
+  new HemisphericLight("light", new Vector3(0, 1, 0), scene);
 
   // === WORLD ===
   const world = new WorldGenerator(scene);
   world.generateTerrain();
 
-  // === FREE CAM ===
+  // === FREE CAMERA ===
   const freeCam = new UniversalCamera("FreeCam", new Vector3(0, 5, -10), scene);
   freeCam.speed = 0.5;
   freeCam.angularSensibility = 500;
 
-  // === PLAYER + THIRD PERSON CAM ===
+  // === LOAD PLAYER WITH CAMERA + ANIMATION ===
   const controller = await PlayerController.getInstance(scene);
-  scene.activeCamera = controller.thirdPersonCam;
 
-  // === CAMERA STATE SWITCH ===
+  // === CAMERA CONTROL ===
   let isThirdPerson = true;
   scene.activeCamera = controller.thirdPersonCam;
   scene.activeCamera.attachControl(canvas, true);
-  
+  controller.setEnabled(true);
 
   scene.onKeyboardObservable.add((kbInfo) => {
     if (kbInfo.type === KeyboardEventTypes.KEYDOWN && kbInfo.event.key === "Tab") {
@@ -48,17 +46,9 @@ export async function createGame(canvas: HTMLCanvasElement) {
       scene.activeCamera?.detachControl();
       scene.activeCamera = isThirdPerson ? controller.thirdPersonCam : freeCam;
       scene.activeCamera.attachControl(canvas, true);
-      
+      controller.setEnabled(isThirdPerson);
     }
   });
-
- 
-// === PLAYER + ANIMATION ===
-
-
-
- // 👈 Load and log animation groups
-
 
   // === RENDER LOOP ===
   engine.runRenderLoop(() => {
@@ -69,5 +59,6 @@ export async function createGame(canvas: HTMLCanvasElement) {
     engine.resize();
   });
 
-  //scene.debugLayer.show();
+  // Optional: Uncomment to open inspector
+  // scene.debugLayer.show();
 }
