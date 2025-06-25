@@ -6,7 +6,13 @@ import {
   HemisphericLight,
   UniversalCamera,
   KeyboardEventTypes,
+  CubeTexture
 } from "@babylonjs/core";
+
+import { Clouds } from "./Clouds";
+
+
+
 
 import { WorldGenerator } from "./WorldGenerator";
 import { PlayerController } from "./PlayerController";
@@ -24,6 +30,19 @@ export async function createGame(canvas: HTMLCanvasElement) {
   // === WORLD ===
   const world = new WorldGenerator(scene);
   world.generateTerrain();
+
+// === SKY ENVIRONMENT ===
+const environmentTexture = CubeTexture.CreateFromPrefilteredData("/env/sky2.env", scene);
+scene.environmentTexture = environmentTexture;
+scene.createDefaultSkybox(environmentTexture, true, 1000);
+scene.environmentIntensity = 1; // Default is 1.0, try 0.1 to 0.5
+
+
+
+
+// ... Clouds
+const clouds = Clouds.getInstance(scene);
+
 
   // === FREE CAMERA ===
   const freeCam = new UniversalCamera("FreeCam", new Vector3(0, 5, -10), scene);
