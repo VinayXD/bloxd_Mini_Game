@@ -98,4 +98,5 @@ export class GreedyMesher {
     const normals = normal.concat(normal, normal, normal);
     return { positions, normals };
   }
+  
 }

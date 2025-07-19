@@ -1,5 +1,6 @@
-import {
+ import {
   ArcRotateCamera,
+  FreeCamera,
   KeyboardEventTypes,
   Scene,
   Vector3,
@@ -7,12 +8,12 @@ import {
   SceneLoader,
   TransformNode,
   PointerEventTypes,
-  Scalar
-
+  Scalar,
+  Mesh,
+  Matrix
 } from "@babylonjs/core";
 
 import "@babylonjs/loaders";
-
 import { PlayerAnimation } from "./PlayerAnimation";
 
 let instance: PlayerController | null = null;
@@ -20,24 +21,28 @@ let instance: PlayerController | null = null;
 export class PlayerController {
   public readonly player: TransformNode;
   public readonly thirdPersonCam: ArcRotateCamera;
+  public firstPersonCam!: FreeCamera;
   public readonly animation: PlayerAnimation;
 
   private scene: Scene;
   private inputMap: Record<string, boolean> = {};
   private speed = 0.05;
-  private enabled = true;
+  private isFirstPerson = false;
 
-private walkSpeed = 0.05;
-private sprintSpeed = 0.1;
-private crouchSpeed = 0.025;
+  private walkSpeed = 0.05;
+  private sprintSpeed = 0.1;
+  private crouchSpeed = 0.025;
 
-private isShiftPressed: boolean = false;
-private isCrouching: boolean = false;
+  private isShiftPressed: boolean = false;
+  private isCrouching: boolean = false;
+  private hiddenMeshes: Mesh[] = [];
 
-private strafeRotationTarget: number = 0;
-  private strafeRotationCurrent: number = 0;
-  private maxStrafeAngle = Math.PI / 4;
-  private strafeSpeed = 0.1;
+  private pitch: number = 0;
+  private yaw: number = 0;
+
+  private tpRotationTarget!: TransformNode;
+  private fpRotationTarget!: TransformNode;
+  private lastYaw: number = 0;
 
   private constructor(
     scene: Scene,
@@ -62,19 +67,12 @@ private strafeRotationTarget: number = 0;
     if (instance) return instance;
 
     const result = await SceneLoader.ImportMeshAsync("", "/models/", "ninja.glb", scene);
-
-    if (result.skeletons.length > 0) {
-      console.log("✅ Skeleton found!");
-      console.log("Bones:", result.skeletons[0].bones.map(b => b.name));
-    } else {
-      console.log("❌ No skeleton or bones found in this .glb.");
-    }
+    const modelRoot = result.meshes[0] as TransformNode;
+    const skeleton = result.skeletons[0];
 
     result.animationGroups.forEach((group) => group.stop());
 
-    const modelRoot = result.meshes[0] as TransformNode;
-
-    modelRoot.position = new Vector3(0, 10, 0);
+    modelRoot.position = new Vector3(0, 1, 0);
     modelRoot.rotationQuaternion = Quaternion.Identity();
     modelRoot.scaling = new Vector3(1, 1, 1);
 
@@ -83,157 +81,197 @@ private strafeRotationTarget: number = 0;
       m.setEnabled(true);
     });
 
-    const camera = new ArcRotateCamera(
+    const tpTarget = new TransformNode("tpRotationTarget", scene);
+    const fpTarget = new TransformNode("fpRotationTarget", scene);
+    fpTarget.position = modelRoot.position.add(new Vector3(0, 1.75, 0));
+
+    const thirdPersonCam = new ArcRotateCamera(
       "ThirdPersonCam",
-      Math.PI / 2,
-      Math.PI / 3,
-      10,
-      modelRoot.position,
+      -Math.PI / 2, // behind the player correctly
+      Math.PI / 3.5,  // slightly above
+      7.5,            // radius
+      modelRoot.position.clone(),
       scene
     );
-    camera.lowerRadiusLimit = 6;
-    camera.upperRadiusLimit = 15;
-    camera.setPosition(new Vector3(0, 10, -10));
-    camera.inputs.clear(); // Disable default input
-    camera.attachControl(false);
+    thirdPersonCam.lowerRadiusLimit = 10;
+    thirdPersonCam.upperRadiusLimit = 10;
+    thirdPersonCam.inputs.clear();
+    thirdPersonCam.attachControl(true);
+    thirdPersonCam.parent = tpTarget;
 
-    const animation = new PlayerAnimation(scene, result.skeletons[0], result.animationGroups);
+    const animation = new PlayerAnimation(scene, skeleton, result.animationGroups);
+    instance = new PlayerController(scene, modelRoot, thirdPersonCam, animation);
 
-    instance = new PlayerController(scene, modelRoot, camera, animation);
+    const fpCam = new FreeCamera("FirstPersonCam", new Vector3(0, 1.75, 0), scene);
+    fpCam.minZ = 0.3;
+    fpCam.speed = 0.0001;
+    fpCam.attachControl(false);
+    fpCam.parent = fpTarget;
+
+    instance.firstPersonCam = fpCam;
+    instance.fpRotationTarget = fpTarget;
+    instance.tpRotationTarget = tpTarget;
+
+    instance.hiddenMeshes = result.meshes.filter((mesh): mesh is Mesh => {
+      return mesh instanceof Mesh && mesh !== modelRoot;
+    });
+
     return instance;
   }
 
-  public setEnabled(state: boolean) {
-    this.enabled = state;
+public toggleFirstPerson(canvas: HTMLCanvasElement) {
+  this.isFirstPerson = !this.isFirstPerson;
+
+  const from = this.isFirstPerson ? this.tpRotationTarget : this.fpRotationTarget;
+  const to = this.isFirstPerson ? this.fpRotationTarget : this.tpRotationTarget;
+  to.rotationQuaternion = from.rotationQuaternion?.clone() ?? Quaternion.Identity();
+
+  // 👇 Fix: reset third-person cam angles when switching back
+  if (!this.isFirstPerson) {
+    const yaw = this.tpRotationTarget.rotation.y;
+    this.thirdPersonCam.alpha = -Math.PI / 2 + yaw;
+    this.thirdPersonCam.beta = Math.PI / 3.5; // Reset elevation if needed
   }
 
-private registerInput() {
-  this.scene.onKeyboardObservable.add((kbInfo) => {
-    const key = kbInfo.event.key.toLowerCase();
+  this.scene.activeCamera?.detachControl();
+  this.scene.activeCamera = this.isFirstPerson ? this.firstPersonCam : this.thirdPersonCam;
 
-    if (kbInfo.type === KeyboardEventTypes.KEYDOWN) {
-      this.inputMap[key] = true;
+  setTimeout(() => {
+    this.scene.activeCamera?.attachControl(canvas, true);
+  }, 0);
 
-      if (key === "shift") this.isShiftPressed = true;
-      if (key === "c") this.isCrouching = true;
-
-    } else if (kbInfo.type === KeyboardEventTypes.KEYUP) {
-      this.inputMap[key] = false;
-
-      if (key === "shift") this.isShiftPressed = false;
-      if (key === "c") this.isCrouching = false;
-    }
-  });
+  this.hiddenMeshes.forEach(mesh => mesh.setEnabled(!this.isFirstPerson));
 }
 
 
-private registerUpdate() {
-  this.scene.onBeforeRenderObservable.add(() => {
-    if (!this.enabled) return;
+  private registerInput() {
+    this.scene.onKeyboardObservable.add((kbInfo) => {
+      const key = kbInfo.event.key.toLowerCase();
 
-    const forward = this.thirdPersonCam.getForwardRay().direction;
-    const right = Vector3.Cross(forward, Vector3.Up()).normalize();
+      if (kbInfo.type === KeyboardEventTypes.KEYDOWN) {
+        this.inputMap[key] = true;
+        if (key === "shift") this.isShiftPressed = true;
+        if (key === "c") this.isCrouching = true;
+      } else if (kbInfo.type === KeyboardEventTypes.KEYUP) {
+        this.inputMap[key] = false;
+        if (key === "shift") this.isShiftPressed = false;
+        if (key === "c") this.isCrouching = false;
+      }
+    });
+  }
 
-    let moveDir = Vector3.Zero();
+  private registerUpdate() {
+    this.scene.onBeforeRenderObservable.add(() => {
+      const target = this.isFirstPerson ? this.fpRotationTarget : this.tpRotationTarget;
+      const forward = Vector3.TransformCoordinates(Vector3.Forward(), target.getWorldMatrix()).subtract(target.position).normalize();
+      const right = Vector3.Cross(forward, Vector3.Up()).normalize();
 
-    if (this.inputMap["w"] || this.inputMap["arrowup"]) moveDir = moveDir.add(forward);
-    if (this.inputMap["s"] || this.inputMap["arrowdown"]) moveDir = moveDir.subtract(forward);
-    if (this.inputMap["d"] || this.inputMap["arrowright"]) moveDir = moveDir.subtract(right);
-    if (this.inputMap["a"] || this.inputMap["arrowleft"]) moveDir = moveDir.add(right);
+      let moveDir = Vector3.Zero();
+      if (this.inputMap["w"] || this.inputMap["arrowup"]) moveDir = moveDir.add(forward);
+      if (this.inputMap["s"] || this.inputMap["arrowdown"]) moveDir = moveDir.subtract(forward);
+      if (this.inputMap["d"] || this.inputMap["arrowright"]) moveDir = moveDir.subtract(right);
+      if (this.inputMap["a"] || this.inputMap["arrowleft"]) moveDir = moveDir.add(right);
 
-    const isMoving = !moveDir.equals(Vector3.Zero());
+      const isMoving = !moveDir.equals(Vector3.Zero());
+      this.speed = this.isCrouching ? this.crouchSpeed : (isMoving && this.isShiftPressed ? this.sprintSpeed : this.walkSpeed);
 
-    // 🏃 Set movement speed based on state
-    if (this.isCrouching) {
-      this.speed = this.crouchSpeed;
-    } else if (isMoving && this.isShiftPressed) {
-      this.speed = this.sprintSpeed;
-    } else {
-      this.speed = this.walkSpeed;
-    }
+      if (isMoving) {
+        moveDir.y = 0;
+        moveDir.normalize();
+        this.player.position.addInPlace(moveDir.scale(this.speed));
+      }
 
-    // 🚶 Apply movement
-    if (isMoving) {
-      moveDir.y = 0;
-      moveDir.normalize();
-      this.player.position.addInPlace(moveDir.scale(this.speed));
-    }
+      this.fpRotationTarget.position.copyFrom(this.player.position).addInPlace(new Vector3(0, 1.75, 0));
+      this.tpRotationTarget.position.copyFrom(this.player.position);
 
-    // 🎯 Get flat camera forward direction
-    const camForward = this.thirdPersonCam.getForwardRay().direction;
-    camForward.y = 0;
-    camForward.normalize();
+      const currentYaw = target.rotation.y;
+      if (Math.abs(this.lastYaw - currentYaw) > 0.001) {
+        const targetQuat = Quaternion.FromEulerAngles(0, currentYaw, 0);
+        if (Quaternion.Dot(this.player.rotationQuaternion!, targetQuat) < 0) {
+          targetQuat.scaleInPlace(-1);
+        }
+        this.player.rotationQuaternion = Quaternion.Slerp(this.player.rotationQuaternion!, targetQuat, 0.15);
+        this.lastYaw = currentYaw;
+      }
 
-    // 🌀 Calculate full rotation with strafe offset
-    const baseAngle = Math.atan2(camForward.x, camForward.z);
+      if (this.isCrouching) this.animation.playBaseAnimation("Crouch");
+      else if (isMoving && this.isShiftPressed) this.animation.playBaseAnimation("Sprint");
+      else if (isMoving) this.animation.playBaseAnimation("Walk");
+      else this.animation.playBaseAnimation("Idle");
+    });
+  }
 
-    // 🔁 Handle strafe lean from A/D
-    if (this.inputMap["a"] || this.inputMap["arrowleft"]) {
-      this.strafeRotationTarget = -this.maxStrafeAngle;
-    } else if (this.inputMap["d"] || this.inputMap["arrowright"]) {
-      this.strafeRotationTarget = this.maxStrafeAngle;
-    } else {
-      this.strafeRotationTarget = 0;
-    }
-
-    this.strafeRotationCurrent = Scalar.Lerp(
-      this.strafeRotationCurrent,
-      this.strafeRotationTarget,
-      this.strafeSpeed
-    );
-
-    const totalAngle = baseAngle + this.strafeRotationCurrent;
-    const targetRotation = Quaternion.FromEulerAngles(0, totalAngle, 0);
-    this.player.rotationQuaternion = Quaternion.Slerp(
-      this.player.rotationQuaternion!,
-      targetRotation,
-      0.1
-    );
-
-    // 🎥 Keep camera targeting player
-    this.thirdPersonCam.setTarget(this.player.position);
-
-    // 🎭 Animation state
-    if (this.isCrouching) {
-      this.animation.playBaseAnimation("Crouch");
-    } else if (isMoving && this.isShiftPressed) {
-      this.animation.playBaseAnimation("Sprint");
-    } else if (isMoving) {
-      this.animation.playBaseAnimation("Walk");
-    } else {
-      this.animation.playBaseAnimation("Idle");
-    }
-  });
-}
-
-
-
-
-  private setupMouseCameraControl() {
-    let previousX: number | null = null;
-    let previousY: number | null = null;
+ private setupMouseCameraControl() {
+    const canvas = this.scene.getEngine().getRenderingCanvas();
     const sensitivity = 0.005;
 
     this.scene.onPointerObservable.add((pointerInfo) => {
-      if (pointerInfo.type === PointerEventTypes.POINTERMOVE) {
+      if (!canvas) return;
+
+      if (pointerInfo.type === PointerEventTypes.POINTERMOVE &&
+        document.pointerLockElement === canvas) {
         const event = pointerInfo.event as PointerEvent;
 
-        if (previousX !== null && previousY !== null) {
-          const deltaX = event.clientX - previousX;
-          const deltaY = event.clientY - previousY;
+        if (this.isFirstPerson) {
+          this.yaw += event.movementX * sensitivity;
+          this.pitch -= event.movementY * sensitivity;
+          this.pitch = Scalar.Clamp(this.pitch, -Math.PI / 2 + 0.1, Math.PI / 2 - 0.1);
+          this.fpRotationTarget.rotation.set(this.pitch, this.yaw, 0);
+        } else {
+          this.tpRotationTarget.rotation.y += event.movementX * sensitivity;
+          this.thirdPersonCam.beta -= event.movementY * sensitivity;
+          this.thirdPersonCam.beta = Scalar.Clamp(this.thirdPersonCam.beta, 0.1, Math.PI / 2);
+        }
+      }
 
-          this.thirdPersonCam.alpha -= deltaX * sensitivity;
-          this.thirdPersonCam.beta -= deltaY * sensitivity;
+      if (pointerInfo.type === PointerEventTypes.POINTERDOWN) {
+        const event = pointerInfo.event as PointerEvent;
+        console.log("Pointer down event:", event.button);
+
+        if (event.button === 0) {
+          console.log("Left click detected – should trigger attack if not blocked.");
         }
 
-        previousX = event.clientX;
-        previousY = event.clientY;
-      }
-
-      if (pointerInfo.type === PointerEventTypes.POINTERUP) {
-        previousX = null;
-        previousY = null;
+        if (document.pointerLockElement !== canvas && event.button !== 0) {
+          canvas.requestPointerLock();
+          console.log("🔒 Pointer lock requested.");
+        }
       }
     });
+
+    document.addEventListener("pointerlockchange", () => {
+      if (document.pointerLockElement !== canvas) {
+        console.log("🔓 Pointer lock exited");
+      }
+    });
+  }
+
+  public async attachSwordToLeftArm(scene: Scene): Promise<void> {
+    const result = await SceneLoader.ImportMeshAsync("", "/models/", "Sword.glb", scene);
+    const sword = result.meshes[0];
+    sword.scaling.set(1, 1, 1);
+
+    const skeleton = this.animation['skeleton'];
+    const leftArm = skeleton.bones.find(b => b.name === "leftarmBone");
+
+    if (!leftArm) {
+      console.warn("❌ Could not find 'leftarmBone' to attach the sword.");
+      return;
+    }
+
+    const boneNode = leftArm.getTransformNode();
+    if (!boneNode) {
+      console.warn("❌ leftarmBone has no transform node.");
+      return;
+    }
+
+    sword.parent = boneNode;
+    sword.position = new Vector3(-0.604, 0.775, 0);
+    sword.rotationQuaternion = new Quaternion(
+      0.2988362387301197,
+      -0.6408563820557885,
+      -0.6408563820557885,
+      0.29883623873011994
+    );
   }
 }

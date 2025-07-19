@@ -2,8 +2,7 @@ import {
   Scene,
   StandardMaterial,
   Color3,
-  Vector3,
-  Vector4,
+ 
   Mesh,
   VertexData,
   MeshBuilder
@@ -38,7 +37,7 @@ export class Clouds {
   private createCloudMaterial(): StandardMaterial {
     const mat = new StandardMaterial("cloudMat", this.scene);
     mat.emissiveColor = new Color3(1, 1, 1);
-    mat.alpha = 0.2;
+    mat.alpha = 0.3;
     mat.disableLighting = true;
     mat.backFaceCulling = false;
     return mat;
@@ -145,17 +144,16 @@ export class Clouds {
     this.cloudMesh = mesh;
   }
 
-  private animateCloudMesh() {
-    this.scene.onBeforeRenderObservable.add(() => {
-      if (this.cloudMesh) {
-        this.cloudMesh.position.x += this.speed;
-        if (this.cloudMesh.position.x > this.range / 2) {
-          this.cloudMesh.position.x = -this.range / 2;
-        }
+private animateCloudMesh() {
+  this.scene.onBeforeRenderObservable.add(() => {
+    if (this.cloudMesh) {
+      this.cloudMesh.position.z += this.speed;
+      if (this.cloudMesh.position.z > this.range / 2) {
+        this.cloudMesh.position.z = -this.range / 2;
       }
-    });
-  }
-
+    }
+  });
+}
   private countAliveNeighbors(grid: number[][], x: number, z: number): number {
     const sizeX = this.gridWidth;
     const sizeZ = this.gridDepth;

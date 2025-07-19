@@ -6,71 +6,66 @@ import {
   HemisphericLight,
   UniversalCamera,
   KeyboardEventTypes,
-  CubeTexture
+  CubeTexture,
 } from "@babylonjs/core";
 
 import { Clouds } from "./Clouds";
-
-
-
+import "@babylonjs/loaders/glTF";
 
 import { WorldGenerator } from "./WorldGenerator";
-import { PlayerController } from "./PlayerController";
 
 import "@babylonjs/inspector";
 import "@babylonjs/loaders";
+import { CharacterController } from "./CharacterController"; // Make sure the path matches
+
+
+
 
 export async function createGame(canvas: HTMLCanvasElement) {
   const engine = new Engine(canvas, true);
   const scene = new Scene(engine);
 
   // === LIGHT ===
-  new HemisphericLight("light", new Vector3(0, 1, 0), scene);
+  const light = new HemisphericLight("light", new Vector3(0, 1, 0), scene);
 
   // === WORLD ===
   const world = new WorldGenerator(scene);
   world.generateTerrain();
 
-// === SKY ENVIRONMENT ===
-const environmentTexture = CubeTexture.CreateFromPrefilteredData("/env/sky2.env", scene);
-scene.environmentTexture = environmentTexture;
-scene.createDefaultSkybox(environmentTexture, true, 1000);
-scene.environmentIntensity = 1; // Default is 1.0, try 0.1 to 0.5
+  // === SKY ENVIRONMENT ===
+  const environmentTexture = CubeTexture.CreateFromPrefilteredData("/env/sky2.env", scene);
+  scene.environmentTexture = environmentTexture;
+  scene.createDefaultSkybox(environmentTexture, true, 1000);
+  scene.environmentIntensity = 1;
 
-
-
-
-// ... Clouds
-const clouds = Clouds.getInstance(scene);
-
+  // === CLOUDS ===
+  const clouds = Clouds.getInstance(scene);
 
   // === FREE CAMERA ===
   const freeCam = new UniversalCamera("FreeCam", new Vector3(0, 5, -10), scene);
   freeCam.speed = 0.5;
   freeCam.angularSensibility = 500;
-
-  // === LOAD PLAYER WITH CAMERA + ANIMATION ===
-  const controller = await PlayerController.getInstance(scene);
-
-  // === CAMERA CONTROL ===
-  let isThirdPerson = true;
-  scene.activeCamera = controller.thirdPersonCam;
+  scene.activeCamera = freeCam;
   scene.activeCamera.attachControl(canvas, true);
-  controller.setEnabled(true);
 
+  // Inside Character Controller():
+const player = await CharacterController.load(scene);
+scene.activeCamera = player.thirdPersonCam;
+player.thirdPersonCam.attachControl(canvas, true);
+
+
+
+  // === CAMERA MODE TOGGLE ===
   scene.onKeyboardObservable.add((kbInfo) => {
-    if (kbInfo.type === KeyboardEventTypes.KEYDOWN && kbInfo.event.key === "Tab") {
-      isThirdPerson = !isThirdPerson;
-
-      scene.activeCamera?.detachControl();
-      scene.activeCamera = isThirdPerson ? controller.thirdPersonCam : freeCam;
-      scene.activeCamera.attachControl(canvas, true);
-      controller.setEnabled(isThirdPerson);
+    if (kbInfo.type === KeyboardEventTypes.KEYDOWN) {
+      // Tab and P toggle logic removed since no controller is loaded
     }
   });
 
   // === RENDER LOOP ===
   engine.runRenderLoop(() => {
+    player.thirdPersonCam.target.copyFrom(player.root.position);
+
     scene.render();
   });
 
@@ -78,6 +73,5 @@ const clouds = Clouds.getInstance(scene);
     engine.resize();
   });
 
-  // Optional: Uncomment to open inspector
-  // scene.debugLayer.show();
+   scene.debugLayer.show();
 }
