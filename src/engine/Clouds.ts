@@ -5,7 +5,7 @@ import {
  
   Mesh,
   VertexData,
-  MeshBuilder
+  
 } from "@babylonjs/core";
 
 export class Clouds {
@@ -74,7 +74,7 @@ export class Clouds {
     const indices: number[] = [];
     const normals: number[] = [];
     const uvs: number[] = [];
-    let indexOffset = 0;
+   // let indexOffset = 0;
 
     const addFace = (face: number[][], nx: number, ny: number, nz: number) => {
       const normal = [nx, ny, nz];

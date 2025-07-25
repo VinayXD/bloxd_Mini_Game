@@ -2,7 +2,6 @@ import {
   AnimationGroup,
   Bone,
   Skeleton,
-  TargetedAnimation,
 } from "@babylonjs/core";
 
 export class PlayerAnimator {

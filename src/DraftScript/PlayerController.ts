@@ -9,12 +9,11 @@
   TransformNode,
   PointerEventTypes,
   Scalar,
-  Mesh,
-  Matrix
+  Mesh
 } from "@babylonjs/core";
 
 import "@babylonjs/loaders";
-import { PlayerAnimation } from "./PlayerAnimation";
+import { PlayerAnimation } from "../engine/PlayerAnimation";
 
 let instance: PlayerController | null = null;
 

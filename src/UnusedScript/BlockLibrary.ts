@@ -20,7 +20,7 @@ export class BlockLibrary {
 
     // ✅ Base block material (basic diffuse, light-reactive)
     this.blockMaterial = new StandardMaterial("blockMat", scene);
-    this.blockMaterial.diffuseColor = new Color3(0.4, 0.8, 0.4); // green
+    this.blockMaterial.diffuseColor = new Color3(0.4, 0, 0.4); // green
     this.blockMaterial.backFaceCulling = true;
 
     // ✅ Outline material (black lines, no lighting)

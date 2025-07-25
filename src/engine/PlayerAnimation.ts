@@ -1,7 +1,8 @@
 // PlayerAnimation.ts
 import { Scene, Skeleton, Bone, AnimationGroup } from "@babylonjs/core";
 
-export type AnimationState = "Idle" | "Walk" | "Sprint" | "Crouch";
+export type AnimationState = "Idle" | "Walk" | "Sprint" | "Crouch" | "Jump";
+
 
 
 const LayeredAnimationConfig: Record<string, string[]> = {
@@ -26,10 +27,10 @@ export class PlayerAnimation {
     this.skeleton.bones.forEach(b => console.log("🔹", b.name));
 
     for (const group of animationGroups) {
-      console.log(`🎞️ Animation Group: ${group.name}`);
+      //console.log(`🎞️ Animation Group: ${group.name}`);
       group.targetedAnimations.forEach(({ target, animation }) => {
         const boneName = (target as Bone).name ?? "unknown";
-        console.log(`  👉 Target Bone: ${boneName}, Animation: ${animation.name}, Keys: ${animation.getKeys().length}`);
+       // console.log(`  👉 Target Bone: ${boneName}, Animation: ${animation.name}, Keys: ${animation.getKeys().length}`);
       });
 
       const boneNames = LayeredAnimationConfig[group.name];
@@ -39,13 +40,13 @@ export class PlayerAnimation {
         );
 
         if (filtered.length === 0) {
-          console.warn(`⚠️ No matching animations found for '${group.name}' on bones: ${boneNames.join(", ")}`);
+          //console.warn(`⚠️ No matching animations found for '${group.name}' on bones: ${boneNames.join(", ")}`);
         } else {
           group.targetedAnimations.length = 0;
           filtered.forEach(({ animation, target }) => {
             group.addTargetedAnimation(animation, target);
           });
-          console.log(`✅ Filtered '${group.name}' to only: ${boneNames.join(", ")}`);
+          //console.log(`✅ Filtered '${group.name}' to only: ${boneNames.join(", ")}`);
         }
       }
 
@@ -56,7 +57,7 @@ export class PlayerAnimation {
     // Add mouse click listener for Left-Attack
     this.scene.onPointerObservable.add((pointerInfo) => {
       if (pointerInfo.event instanceof PointerEvent && pointerInfo.event.button === 0) {
-        console.log("🖱️ Left click detected — triggering Left_Attack");
+        //console.log("🖱️ Left click detected — triggering Left_Attack");
         this.playLayeredAnimation("Right-Attack");
       }
     });
@@ -98,13 +99,13 @@ playLayeredAnimation(name: string) {
   }
 
   // 🚧 TEMP: Play full animation group for debug
-  console.warn(`🚧 TEMP: Playing full animation group '${name}' for debug purposes.`);
+  //console.warn(`🚧 TEMP: Playing full animation group '${name}' for debug purposes.`);
   group.start(false, 1.0, group.from, group.to, false);
    // comment out this return after confirming animation is visible
 
   const bones = this.skeleton.bones.filter(b => boneNames.includes(b.name));
   if (bones.length === 0) {
-    console.warn(`⚠️ No bones found in skeleton matching: ${boneNames.join(", ")}`);
+    //console.warn(`⚠️ No bones found in skeleton matching: ${boneNames.join(", ")}`);
     return;
   }
 
@@ -112,19 +113,19 @@ playLayeredAnimation(name: string) {
     const animations = group.targetedAnimations.filter(({ target }) => (target as Bone).name === bone.name);
 
     if (animations.length === 0) {
-      console.warn(`⚠️ No animations targeting '${bone.name}' in '${name}' group.`);
+      //console.warn(`⚠️ No animations targeting '${bone.name}' in '${name}' group.`);
     } else {
-      console.log(`🎯 Playing ${animations.length} animations for bone '${bone.name}' in '${name}'`);
+      //console.log(`🎯 Playing ${animations.length} animations for bone '${bone.name}' in '${name}'`);
     }
 
     animations.forEach(({ animation }) => {
       const keys = animation.getKeys();
-      console.log(`📦 Keys for ${animation.name} on ${bone.name}:`);
+      //console.log(`📦 Keys for ${animation.name} on ${bone.name}:`);
       keys.forEach(k => {
-        console.log(`  ⏱ Frame ${k.frame}:`, k.value);
+        //console.log(`  ⏱ Frame ${k.frame}:`, k.value);
       });
 
-      console.log(`🎬 Playing animation '${animation.name}' on '${bone.name}'`);
+      //console.log(`🎬 Playing animation '${animation.name}' on '${bone.name}'`);
       this.scene.beginDirectAnimation(
         bone,
         [animation],
