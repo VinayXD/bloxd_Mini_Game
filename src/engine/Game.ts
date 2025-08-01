@@ -1,4 +1,3 @@
-// Game.ts
 import {
   Engine,
   Scene,
@@ -6,6 +5,7 @@ import {
   HemisphericLight,
   UniversalCamera,
   CubeTexture,
+  Color3
 } from "@babylonjs/core";
 
 import "@babylonjs/loaders/glTF";
@@ -17,39 +17,48 @@ import { CharacterController } from "./CharacterController";
 
 import { registerAllBlocks } from "../DraftScript/BlockRegistry";
 import { BlockLibrary } from "../DraftScript/BlockLibrary";
+import { BlockPlacer } from "./BlockPlacer";
+import { VoxelChunk } from "./VoxelChunk";
+import { VoxelWorld } from "./VoxelWorld";
+
+const voxelWorld = new VoxelWorld();
 
 export async function createGame(canvas: HTMLCanvasElement) {
   const engine = new Engine(canvas, true);
   const scene = new Scene(engine);
 
   // === LIGHT ===
-  new HemisphericLight("light", new Vector3(0, 1, 0), scene);
+  //new HemisphericLight("light", new Vector3(0, 20, 0), scene);
 
   // === REGISTER BLOCK TYPES ===
   registerAllBlocks();
 
-  // === PLACE TEST BLOCK ===
- // Parameters
-const levels = 4; // Pyramid height
-const blockSize = 1;
+  // === PLACE PYRAMID OF STONE BLOCKS ===
+  const chunk = new VoxelChunk(scene, new Vector3(0, 0, 0));
+  voxelWorld.addChunk(chunk, 0, 0, 0);
 
-for (let y = 0; y < levels; y++) {
-  const size = levels - y;
+  const stoneId = BlockLibrary.getNumericId("stone");
+  const levels = 4;
 
-  for (let x = -size; x <= size; x++) {
-    for (let z = -size; z <= size; z++) {
-      const block = BlockLibrary.createMesh("base", scene);
-      block.position.set(x * blockSize, y * blockSize + 0.5, z * blockSize); // 0.5 centers it
+  for (let y = 0; y < levels; y++) {
+    const size = levels - y;
+    for (let x = -size; x <= size; x++) {
+      for (let z = -size; z <= size; z++) {
+        const px = x + 8;
+        const py = y;
+        const pz = z + 8;
+        if (px >= 0 && px < 16 && pz >= 0 && pz < 16) {
+          chunk.setBlock(px, py, pz, stoneId);
+        }
+      }
     }
   }
-}
 
-const block1 = BlockLibrary.createMesh("base",scene);
-block1.position.set(0,8,0);
+  chunk.rebuildMesh();
 
-
-
-
+  // === DEBUG BLOCK OUTLINE (Optional) ===
+  const blockOutline = BlockLibrary.createBlockOutline(scene, 1);
+  blockOutline.isVisible = false;
 
   // === SKY ENVIRONMENT ===
   const environmentTexture = CubeTexture.CreateFromPrefilteredData("/env/sky2.env", scene);
@@ -69,8 +78,11 @@ block1.position.set(0,8,0);
 
   // === PLAYER ===
   const player = await CharacterController.load(scene);
+  player.setVoxelWorld(voxelWorld); // Inject voxel world for math-based collision
   scene.activeCamera = player.thirdPersonCam;
   player.thirdPersonCam.attachControl(canvas, true);
+  new BlockPlacer(scene, player, voxelWorld);
+
 
   // === RENDER LOOP ===
   engine.runRenderLoop(() => {
@@ -80,5 +92,6 @@ block1.position.set(0,8,0);
 
   window.addEventListener("resize", () => engine.resize());
 
-  // scene.debugLayer.show(); // Optional dev tools
+  // Dev tools
+  //scene.debugLayer.show();
 }

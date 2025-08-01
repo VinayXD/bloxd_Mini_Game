@@ -14,7 +14,6 @@ import {
   Scalar,
   MeshBuilder,
   Color3,
-  PhysicsImpostor,
   StandardMaterial,
   Mesh
 } from "@babylonjs/core";
@@ -22,7 +21,8 @@ import {
 import "@babylonjs/loaders"; 
 import { PlayerAnimation } from "./PlayerAnimation";
 import type { AnimationState } from "./PlayerAnimation";
- // adjust path as needed
+ // adjust path as needed 
+ import { VoxelWorld } from "./VoxelWorld";
 
 export class CharacterController {
   public readonly root: TransformNode;
@@ -40,20 +40,18 @@ export class CharacterController {
   private isGrounded = false;
   private scene: Scene;
   private isJumping = false;
-  private standingBlock: Mesh | null = null;
+  private standingBlockVoxel: Vector3 | null = null;
   private readonly colliderHeight = 2.7;
-  private readonly colliderHalfHeight = this.colliderHeight / 2;
-  private readonly jumpHeight = 2.0;     //  jump height in blocks
-  private readonly jumpSpeed = 0.12;     //  how fast we go up initially
-  private readonly gravityStrength = -0.003; //  controls fall speed
-  private readonly terminalVelocity = -0.20; //  max fall speed
-
+  private readonly jumpHeight = 2.0;
+  private readonly gravityStrength = -0.003;
+  private readonly terminalVelocity = -0.20;
+  private stayOnBlockEdge = false;
+  private static instance: CharacterController | null = null;
+  private animator!: PlayerAnimation;
+  private voxelWorld!: VoxelWorld;
 
   
 
-
-  private static instance: CharacterController | null = null;
-  private animator!: PlayerAnimation;
 
  private constructor(
     scene: Scene,
@@ -84,6 +82,8 @@ public static async load(scene: Scene): Promise<CharacterController> {
   if (CharacterController.instance) return CharacterController.instance;
 
   const result = await SceneLoader.ImportMeshAsync("", "/models/", "ninja.glb", scene);
+
+  
 
   const root = result.meshes[0] as TransformNode;
   const thirdPersonCam = new ArcRotateCamera(
@@ -219,16 +219,23 @@ scene.onKeyboardObservable.add((kbInfo) => {
   const instance = CharacterController.instance;
   if (!instance) return;
 
-  if (kbInfo.type === KeyboardEventTypes.KEYDOWN) {
-    instance.inputMap[key] = true;
+ if (kbInfo.type === KeyboardEventTypes.KEYDOWN) {
+  instance.inputMap[key] = true;
 
-    // ✅ Only toggle on key press down
-    if (key === "p") {
-      instance.toggleFirstPersonView(scene);
-    }
-  } else if (kbInfo.type === KeyboardEventTypes.KEYUP) {
-    instance.inputMap[key] = false;
+  if (key === "c") {
+    instance.stayOnBlockEdge = true;
   }
+  if (key === "p") {
+    instance.toggleFirstPersonView(scene);
+  }
+} else if (kbInfo.type === KeyboardEventTypes.KEYUP) {
+  instance.inputMap[key] = false;
+
+  if (key === "c") {
+    instance.stayOnBlockEdge = false;
+  }
+}
+
 
   
 });
@@ -291,14 +298,24 @@ if (event.button === 2) {
   
 }
 
+public getStandingBlockInfo(): { y: number; mesh?: Mesh } | null {
+  return this.getStandingBlock();
+}
+
+
+ public setVoxelWorld(world: VoxelWorld): void {
+    this.voxelWorld = world;
+  }
+
 private setupFirstPersonCamera(scene: Scene): void {
   this.firstPersonCam = new FreeCamera(
     "FirstPersonCam",
-    this.root.position.add(new Vector3(0, 1.75, -1)),
+    this.root.position.add(new Vector3(0, 1.75, 0)),
     scene
   );
 
   this.firstPersonCam.minZ = 0.1;
+  this.firstPersonCam.fov = Math.PI / 4 ;
   this.firstPersonCam.speed = 0.1;
   this.firstPersonCam.rotation = new Vector3(0, 0, 0);
 }
@@ -356,124 +373,80 @@ private normalizeAngle(angle: number): number {
   return angle;
 }
 
-private getStandingBlock(): { y: number; mesh: Mesh } | null {
-  const epsilon = 0.1;
+private getStandingBlock(): { y: number; mesh?: Mesh } | null {
+  const center = this.collider.position.clone().add(new Vector3(0, -1.35, 0));
+  const radiusX = 0.3;
+  const radiusZ = 0.3;
 
-  if (!this.collider) return null;
+  const minX = Math.floor(center.x - radiusX);
+  const maxX = Math.floor(center.x + radiusX);
+  const minZ = Math.floor(center.z - radiusZ);
+  const maxZ = Math.floor(center.z + radiusZ);
+  const y = Math.floor(center.y);
 
-  const colliderBox = this.collider.getBoundingInfo().boundingBox;
-  const colliderBottomY = colliderBox.minimumWorld.y;
-
-  const testXZPoints = [
-    new Vector3(-0.4, 0, -0.3), // back left
-    new Vector3(0.4, 0, -0.3),  // back right
-    new Vector3(-0.4, 0, 0.3),  // front left
-    new Vector3(0.4, 0, 0.3),   // front right
-  ];
-
-  const blocks = this.scene.meshes.filter((m): m is Mesh =>
-    m instanceof Mesh && (m.name.startsWith("base") || m.name.startsWith("block"))
-  );
-
-  for (const block of blocks) {
-    const blockBox = block.getBoundingInfo().boundingBox;
-    const blockTopY = blockBox.maximumWorld.y;
-
-    let hasSupport = false;
-
-    for (const localOffset of testXZPoints) {
-      const worldPoint = Vector3.TransformCoordinates(localOffset, this.collider.getWorldMatrix());
-
-      const x = worldPoint.x;
-      const z = worldPoint.z;
-
-      const isOnBlock =
-        x >= blockBox.minimumWorld.x && x <= blockBox.maximumWorld.x &&
-        z >= blockBox.minimumWorld.z && z <= blockBox.maximumWorld.z &&
-        Math.abs(colliderBottomY - blockTopY) <= epsilon;
-
-      if (isOnBlock) {
-        hasSupport = true;
-        break; // ✅ One corner is enough — stay grounded
+  for (let x = minX; x <= maxX; x++) {
+    for (let z = minZ; z <= maxZ; z++) {
+      if (this.voxelWorld.isBlockSolid(x, y, z)) {
+        this.standingBlockVoxel = new Vector3(x, y, z);
+        return {
+          y: y + 1,
+          mesh: undefined // optional
+        };
       }
-    }
-
-    if (hasSupport) {
-      return { y: blockTopY, mesh: block };
     }
   }
 
+  this.standingBlockVoxel = null;
   return null;
 }
 
 
 
 
+
+
+
+
+
 private checkBlockCollision(nextPos: Vector3): boolean {
-  const playerSize = new Vector3(0.4, 1.35, 0.3);
+  const playerSize = new Vector3(0.3, 1.35, 0.3); // slightly tighter box
+  const min = nextPos.subtract(playerSize);
+  const max = nextPos.add(playerSize);
 
-  // 🟡 Slightly raise the test position so you don’t detect the block you're standing on
-  const testPos = nextPos.add(new Vector3(0, 0.05, 0));
+  const footY = nextPos.y - playerSize.y + 0.05; // tiny margin
 
-  const min = testPos.subtract(playerSize);
-  const max = testPos.add(playerSize);
+  for (let x = Math.floor(min.x); x <= Math.floor(max.x); x++) {
+    for (let y = Math.floor(min.y); y <= Math.floor(max.y); y++) {
+      for (let z = Math.floor(min.z); z <= Math.floor(max.z); z++) {
+        // 🚫 Ignore blocks below or barely at foot level
+        if (y < Math.floor(footY)) continue;
 
-  const blocks = this.scene.meshes.filter((m): m is Mesh =>
-    m instanceof Mesh && (m.name.startsWith("base") || m.name.startsWith("block"))
-  );
-
-  for (const block of blocks) {
-    if (this.standingBlock && block.uniqueId === this.standingBlock.uniqueId) {
-      continue; // ✅ Still skip the standing block
-    }
-
-    const blockMin = block.getBoundingInfo().boundingBox.minimumWorld;
-    const blockMax = block.getBoundingInfo().boundingBox.maximumWorld;
-
-    const intersecting =
-      min.x <= blockMax.x && max.x >= blockMin.x &&
-      min.y <= blockMax.y && max.y >= blockMin.y &&
-      min.z <= blockMax.z && max.z >= blockMin.z;
-
-    if (intersecting) return true;
-  }
-
-  return false;
-}
-
-private checkCeilingCollision(): boolean {
-  if (!this.collider) return false;
-
-  const playerBox = this.collider.getBoundingInfo().boundingBox;
-  const playerTop = playerBox.maximumWorld.y;
-  const buffer = 0.02;
-
-  const blocks = this.scene.meshes.filter((m): m is Mesh =>
-    m instanceof Mesh && (m.name.startsWith("base") || m.name.startsWith("block"))
-  );
-
-  for (const block of blocks) {
-    const box = block.getBoundingInfo().boundingBox;
-    const blockBottom = box.minimumWorld.y;
-
-    const horizontalOverlap =
-      playerBox.maximumWorld.x > box.minimumWorld.x &&
-      playerBox.minimumWorld.x < box.maximumWorld.x &&
-      playerBox.maximumWorld.z > box.minimumWorld.z &&
-      playerBox.minimumWorld.z < box.maximumWorld.z;
-
-    const verticalHit =
-      playerTop <= blockBottom + buffer &&
-      playerTop + this.verticalVelocity >= blockBottom;
-
-    if (horizontalOverlap && verticalHit) {
-      console.log("🚫 Ceiling collision with block:", block.name);
-      return true;
+        if (this.voxelWorld.isBlockSolid(x, y, z)) {
+          return true;
+        }
+      }
     }
   }
 
   return false;
 }
+
+
+
+
+
+
+
+  private checkCeilingCollision(): boolean {
+    const top = this.collider.position.clone().add(new Vector3(0, 1.35, 0));
+    const voxelAbove = new Vector3(
+      Math.floor(top.x),
+      Math.floor(top.y),
+      Math.floor(top.z)
+    );
+
+    return this.voxelWorld.isBlockSolid(voxelAbove.x, voxelAbove.y, voxelAbove.z);
+  }
 
 
 
@@ -482,7 +455,7 @@ private checkCeilingCollision(): boolean {
 private updateCameraMode() {
   if (this.isFirstPerson && this.firstPersonCam) {
     // attach camera to character eye position
-    const headOffset = new Vector3(0, 1.5, 0.2);
+    const headOffset = new Vector3(0, 1.75, 0.2);
     const worldPos = Vector3.TransformCoordinates(headOffset, this.root.getWorldMatrix());
     this.firstPersonCam.position.copyFrom(worldPos);
   }
@@ -530,108 +503,106 @@ private updateFacingToCamera() {
 
 //   setTimeout(() => debugSphere.dispose(), 500); // remove after 0.5s
 // }
+public getColliderMesh(): Mesh {
+  return this.collider;
+}
 
 
-private updateMovement() {
-  const isFP = this.isFirstPerson;
-  const cam = isFP ? this.firstPersonCam : this.thirdPersonCam;
+  private updateMovement() {
+    const isFP = this.isFirstPerson;
+    const cam = isFP ? this.firstPersonCam : this.thirdPersonCam;
 
-  const forward = cam.getDirection(Vector3.Forward());
-  forward.y = 0;
-  forward.normalize();
+    const forward = cam.getDirection(Vector3.Forward());
+    forward.y = 0;
+    forward.normalize();
 
-  const right = Vector3.Cross(Vector3.Up(), forward).normalize();
+    const right = Vector3.Cross(Vector3.Up(), forward).normalize();
 
-  let move = Vector3.Zero();
-  if (this.inputMap["w"] || this.inputMap["arrowup"]) move = move.add(forward);
-  if (this.inputMap["s"] || this.inputMap["arrowdown"]) move = move.subtract(forward);
-  if (this.inputMap["a"] || this.inputMap["arrowleft"]) move = move.subtract(right);
-  if (this.inputMap["d"] || this.inputMap["arrowright"]) move = move.add(right);
+    let move = Vector3.Zero();
+    if (this.inputMap["w"] || this.inputMap["arrowup"]) move = move.add(forward);
+    if (this.inputMap["s"] || this.inputMap["arrowdown"]) move = move.subtract(forward);
+    if (this.inputMap["a"] || this.inputMap["arrowleft"]) move = move.subtract(right);
+    if (this.inputMap["d"] || this.inputMap["arrowright"]) move = move.add(right);
 
-  const moveSpeed = 0.05;
-  let animation: AnimationState = "Idle";
-  const isCrouching = !!this.inputMap["c"];
+    const moveSpeed = 0.05;
+    let animation: AnimationState = "Idle";
+    const isCrouching = !!this.inputMap["c"];
 
-  // 🧍 Movement (X/Z)
-  if (!move.equals(Vector3.Zero())) {
-    move.normalize();
+    if (!move.equals(Vector3.Zero())) {
+      move.normalize();
 
-    if (isCrouching) {
-      animation = "Crouch";
-      move.scaleInPlace(moveSpeed * 0.5);
-    } else if (this.inputMap["shift"]) {
-      animation = "Sprint";
-      move.scaleInPlace(moveSpeed * 2.0);
-    } else {
-      animation = "Walk";
-      move.scaleInPlace(moveSpeed);
-    }
+      if (isCrouching) {
+        animation = "Crouch";
+        move.scaleInPlace(moveSpeed * 0.5);
+      } else if (this.inputMap["shift"]) {
+        animation = "Sprint";
+        move.scaleInPlace(moveSpeed * 2.0);
+      } else {
+        animation = "Walk";
+        move.scaleInPlace(moveSpeed);
+      }
 
-    if (this.collider) {
       const nextPos = this.collider.position.add(move);
       if (!this.checkBlockCollision(nextPos)) {
         this.collider.position.copyFrom(nextPos);
       } else {
         console.log("🚫 Blocked by block");
       }
+    } else if (isCrouching) {
+      animation = "Crouch";
     }
-  } else if (isCrouching) {
-    animation = "Crouch"; // idle crouch
+
+    this.animator.playBaseAnimation(animation);
+    if (!isFP) this.thirdPersonCam.target.copyFrom(this.root.position);
+
+    if (this.inputMap[" "] && this.isGrounded && !this.isJumping) {
+      const jumpVelocity = Math.sqrt(2 * Math.abs(this.gravityStrength) * this.jumpHeight);
+      this.verticalVelocity = jumpVelocity;
+      this.isJumping = true;
+      this.isGrounded = false;
+      this.animator.playBaseAnimation("Jump");
+    }
+
+    if (!(isCrouching && this.stayOnBlockEdge)) {
+      this.verticalVelocity += this.gravityStrength;
+      if (this.verticalVelocity < this.terminalVelocity) {
+        this.verticalVelocity = this.terminalVelocity;
+      }
+    } else {
+      this.verticalVelocity = 0;
+    }
+
+    if (this.verticalVelocity > 0 && this.checkCeilingCollision()) {
+      this.verticalVelocity = 0;
+      console.log("✅ Ceiling collision stopped jump");
+    }
+
+    if (!isCrouching || !this.stayOnBlockEdge) {
+      this.collider.position.y += this.verticalVelocity;
+    }
+
+    const standingInfo = this.getStandingBlock();
+    if (standingInfo && this.verticalVelocity <= 0) {
+      const standY = standingInfo.y;
+      const heightOffset = this.collider.getBoundingInfo().boundingBox.extendSize.y;
+      this.collider.position.y = standY + heightOffset;
+
+      this.verticalVelocity = 0;
+      this.isGrounded = true;
+      this.isJumping = false;
+    } else {
+      this.isGrounded = false;
+    }
   }
 
-  this.animator.playBaseAnimation(animation);
-  if (!isFP) this.thirdPersonCam.target.copyFrom(this.root.position);
-
-  // ⬆️ Handle jumping
-  if (this.inputMap[" "] && this.isGrounded && !this.isJumping) {
-    const jumpVelocity = Math.sqrt(2 * Math.abs(this.gravityStrength) * this.jumpHeight);
-    this.verticalVelocity = jumpVelocity;
-    this.isJumping = true;
-    this.isGrounded = false;
-    this.animator.playBaseAnimation("Jump");
-  }
-
-  // ⬇️ Apply gravity
-  this.verticalVelocity += this.gravityStrength;
-  if (this.verticalVelocity < this.terminalVelocity) {
-    this.verticalVelocity = this.terminalVelocity;
-  }
-
-  // ⛔ Prevent going through blocks from below
-  
- if (this.verticalVelocity > 0) {
-  const ceilingHit = this.checkCeilingCollision();
-  if (ceilingHit) {
-    this.verticalVelocity = 0;
-    console.log("✅ Ceiling collision stopped jump");
-  }
-}
 
 
-  
 
-  // ⬇️ Apply vertical movement
-  if (this.collider) {
-    this.collider.position.y += this.verticalVelocity;
-  }
 
-  // 🧱 Landing check
-  const standingInfo = this.getStandingBlock();
-  if (this.collider && standingInfo && this.verticalVelocity <= 0) {
-    const standY = standingInfo.y;
-    const heightOffset = this.collider.getBoundingInfo().boundingBox.extendSize.y;
-    this.collider.position.y = standY + heightOffset;
 
-    this.verticalVelocity = 0;
-    this.isGrounded = true;
-    this.standingBlock = standingInfo.mesh;
 
-    if (this.isJumping) this.isJumping = false;
-  } else {
-    this.isGrounded = false;
-    this.standingBlock = null;
-  }
-}
+
+
 
 
 
@@ -667,6 +638,10 @@ public async attachSwordToLeftArm(scene: Scene): Promise<void> {
     0.29883623873011994
   );
 }
+public getActiveCamera() {
+  return this.isFirstPerson ? this.firstPersonCam : this.thirdPersonCam;
+}
+
 
 
 

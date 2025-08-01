@@ -2,6 +2,15 @@ import { BlockLibrary } from "./BlockLibrary";
 
 // Register all blocks here
 export function registerAllBlocks() {
+  // ID 0 = air (reserved)
+  BlockLibrary.register({
+    id: "air",
+    textures: "",
+    collider: false,
+    transparent: true,
+  });
+
+  // Now base will get ID = 1
   BlockLibrary.register({
     id: "base",
     textures: "",
@@ -16,5 +25,9 @@ export function registerAllBlocks() {
     color: [1, 0, 0] // red
   });
 
-  // You can add more blocks here
+  BlockLibrary.register({
+    id: "stone",
+    textures: "/textures/Brick.png",
+    collider: true
+  });
 }
